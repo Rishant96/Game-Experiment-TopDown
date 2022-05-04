@@ -1,5 +1,7 @@
 /* date = April 25th 2022 11:16 pm */
 
+#include "math.h"
+
 #ifndef RACER_MATH_H
 #define RACER_MATH_H
 
@@ -116,13 +118,24 @@ LengthSq(v2 A)
     return(Result);
 }
 
-/*
+inline real32
+SquareRoot(real32 Real32)
+{
+    real32 Result = sqrtf(Real32);
+    return(Result);
+}
+
 inline real32
 Length(v2 A)
 {
     real32 Result = SquareRoot(LengthSq(A));
     return(Result);
 }
-*/
+
+inline real32
+Square(real32 A)
+{
+    return (A * A);
+}
 
 #endif //RACER_MATH_H

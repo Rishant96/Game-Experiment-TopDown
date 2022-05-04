@@ -1,5 +1,6 @@
 #include "windows.h"
 #include <stdint.h>
+#include <stdlib.h> // rand
 
 #define internal static 
 #define local_persist static 
@@ -40,8 +41,9 @@ struct game_character
     v2 Center;
     v2 Dim;
     entity_type Type;
-    real32 Accel;
-    real32 Vel;
+    v2 Accel;
+    v2 Vel;
+    real32 MaxSpeed;
     uint32 Color;
     uint32 ExplosionTimer;
 };
@@ -435,61 +437,89 @@ GetInputDiff(game_input *NewInput, game_input *StaleInput)
 
 internal void
 MoveCharacter(game_character* Character, 
+              real32 deltaTimeSec,
               game_input *NewInput = &GlobalInput, 
               game_input *StaleInput = &GlobalOldInput)
 {
-    float SpeedModifierX = 0.0f;
-    float SpeedModifierY = 0.0f;
-    float StraightForceConst = 0.52f;
-    float DiagonalForceConst = 0.525f;
-    game_input Input = GetInputDiff(NewInput, StaleInput);
+    real32 SpeedModifierX = 0.0f;
+    real32 SpeedModifierY = 0.0f;
+    
+    int32 EffectRandomizer = false;
+    int32 EffectMaxPercentX = 30;
+    int32 EffectMaxPercentY = 50;
+    
+    real32 ForceConst = 1000.0f;
+    real32 VelConst = 0.9f;
+    real32 AccelConst = 0.0f;
+    real32 DiagonalConst = 0.75f;
+    
+    // Coeff values range from  0.0f to 1.0f
+    real32 FrictionCoeff = 0.08f;
+    real32 DragCoeff = 0.0f;
+    
+    Character->Accel = V2(0, 0);
+    Character->Color = 0x00ff00ff;
+    
+    //game_input Input = GetInputDiff(NewInput, StaleInput);
+    game_input Input = *NewInput;
+    int32 InputCount = 0;
     if(Input.IsUpPressed)
     {
-        SpeedModifierY = -StraightModifier;
+        Character->Accel.Y -= ForceConst;
+        Character->Color = 0x00ffff;
+        InputCount++;
     }
     if(Input.IsDownPressed)
     {
-        SpeedModifierY = StraightModifier;
+        Character->Accel.Y += ForceConst;
+        Character->Color = 0x00ffff;
+        InputCount++;
     }
     if(Input.IsLeftPressed)
     {
-        SpeedModifierX = -StraightModifier;
+        Character->Accel.X -= ForceConst;
+        Character->Color = 0x00ffff;
+        InputCount++;
     }
     if(Input.IsRightPressed)
     {
-        SpeedModifierX = StraightModifier;
-    }
-    if(Input.IsUpPressed && Input.IsLeftPressed)
-    {
-        SpeedModifierX = -DiagonalModifier;
-        SpeedModifierY = -DiagonalModifier;
-    }
-    if(Input.IsUpPressed && Input.IsRightPressed)
-    {
-        SpeedModifierX = DiagonalModifier;
-        SpeedModifierY = -DiagonalModifier;
-    }
-    if(Input.IsDownPressed && Input.IsLeftPressed)
-    {
-        SpeedModifierX = -DiagonalModifier;
-        SpeedModifierY = DiagonalModifier;
-    }
-    if(Input.IsDownPressed && Input.IsRightPressed)
-    {
-        SpeedModifierX = DiagonalModifier;
-        SpeedModifierY = DiagonalModifier;
-    }
-    if(Input.IsLeftPressed && Input.IsRightPressed)
-    {
-        SpeedModifierX = 0;
-    }
-    if(Input.IsUpPressed && Input.IsDownPressed)
-    {
-        SpeedModifierY = 0;
+        Character->Accel.X += ForceConst;
+        Character->Color = 0x00ffff;
+        InputCount++;
     }
     
-    Character->Center += V2(RoundToCeil(Character->Speed * SpeedModifierX), 
-                            RoundToCeil(Character->Speed * SpeedModifierY));
+    real32 MaxSpeedLocal = Character->MaxSpeed;
+    if (InputCount == 2)
+    {
+        Character->Accel *= DiagonalConst;
+        MaxSpeedLocal *= DiagonalConst;
+        DragCoeff *= DiagonalConst;
+    }
+    
+    if(EffectRandomizer)
+    {
+        real32 Effect = (rand() % EffectMaxPercentX + 1) / 100;
+        Character->Accel.X *= 1 -Effect;
+        Effect = (rand() % EffectMaxPercentY + 1) / 100;
+        Character->Accel.Y *=  1 - Effect;
+    }
+    
+    Character->Vel += Character->Accel * deltaTimeSec;
+    real32 SpeedRatioX = (abs((int)(Character->Vel.X * 1000)) / 1000) / MaxSpeedLocal;
+    Character->Vel.X *=  1 - ((FrictionCoeff / 2) + ((DragCoeff / 2) * SpeedRatioX)); 
+    real32 SpeedRatioY = (abs((int)(Character->Vel.Y * 1000)) / 1000) / MaxSpeedLocal;
+    Character->Vel.Y *=  1 - ((FrictionCoeff / 2) + ((DragCoeff / 2) * SpeedRatioY)); 
+    
+    if(Length(Character->Vel) > Character->MaxSpeed)
+    {
+        Character->Vel *= Character->MaxSpeed / Length(Character->Vel);
+    }
+    
+    Character->Center += (Character->Accel * deltaTimeSec * deltaTimeSec * AccelConst)
+        + (Character->Vel * deltaTimeSec * VelConst);
+    
+    Character->Center = V2(RoundToCeil(Character->Center.X), 
+                           RoundToCeil(Character->Center.Y));
     v2 TopLeftPos = ConvertCenterToTopLeft(Character->Center, Character->Dim);
     if(TopLeftPos.X < 0)
     {
@@ -605,8 +635,9 @@ WinMain(HINSTANCE Instance,
             game_character RectCharacter = {};
             RectCharacter.Center = V2(30, 30);
             RectCharacter.Dim = V2(30, 30);
-            RectCharacter.Accel = 0f;
-            RectCharacter.Vel = 0f;
+            RectCharacter.Accel = {};
+            RectCharacter.Vel = {};
+            RectCharacter.MaxSpeed = 10000;
             RectCharacter.Color = 0x00ff00ff;
             while(GlobalRunning)
             {
@@ -618,7 +649,7 @@ WinMain(HINSTANCE Instance,
                     Win32ProcessSystemInput(Message);
                 }
                 // Process Inputs
-                MoveCharacter(&RectCharacter);
+                MoveCharacter(&RectCharacter, 0.016);
                 Win32DrawRectangle(ConvertCenterToTopLeft(RectCharacter.Center, RectCharacter.Dim),
                                    RectCharacter.Dim,
                                    RectCharacter.Color);
