@@ -69,6 +69,7 @@ global_variable game_buffer GlobalBuffer;
 global_variable game_buffer KeysBuffer;
 global_variable game_input GlobalInput;
 global_variable game_input GlobalOldInput;
+global_variable int64 GlobalPerfCountFrequency;
 
 inline v2
 ConvertTopLeftToCenter(v2 TopLeft, v2 Dim)
@@ -84,6 +85,22 @@ ConvertCenterToTopLeft(v2 Center, v2 Dim)
     v2 Result = {};
     Result = Center - (0.5 * Dim);
     return Result;
+}
+
+inline LARGE_INTEGER
+Win32GetWallClock(void)
+{    
+    LARGE_INTEGER Result;
+    QueryPerformanceCounter(&Result);
+    return(Result);
+}
+
+inline real32
+Win32GetSecondsElapsed(LARGE_INTEGER Start, LARGE_INTEGER End)
+{
+    real32 Result = ((real32)(End.QuadPart - Start.QuadPart) /
+                     (real32)GlobalPerfCountFrequency);
+    return(Result);
 }
 
 internal window_width_height
@@ -448,20 +465,37 @@ MoveCharacter(game_character* Character,
     int32 EffectMaxPercentX = 30;
     int32 EffectMaxPercentY = 50;
     
-    real32 ForceConst = 1000.0f;
-    real32 VelConst = 0.9f;
-    real32 AccelConst = 0.0f;
-    real32 DiagonalConst = 0.75f;
+    real32 ForceConst = 250.0f;
+    real32 VelConst = 1.0f;
+    real32 AccelConst = 0.34f;
+    real32 DiagonalConst = 0.95f;
     
     // Coeff values range from  0.0f to 1.0f
-    real32 FrictionCoeff = 0.08f;
-    real32 DragCoeff = 0.0f;
+    real32 FrictionCoeff = 0.33f;
+    real32 DragCoeff = 0.15f;
+    
+    local_persist int32 RepeatCount = 1;
+    int32 AccelMultiplier = 1;
+    real32 AccelGrowthFactor = 1.5f;
     
     Character->Accel = V2(0, 0);
     Character->Color = 0x00ff00ff;
     
-    //game_input Input = GetInputDiff(NewInput, StaleInput);
+    game_input DiffInput = GetInputDiff(NewInput, StaleInput);
     game_input Input = *NewInput;
+    
+    if(!(DiffInput.IsUpPressed || DiffInput.IsDownPressed ||
+         DiffInput.IsLeftPressed || DiffInput.IsRightPressed))
+    {
+        RepeatCount++;
+    }
+    else
+    {
+        RepeatCount = 1;
+    }
+    AccelMultiplier *= RepeatCount * AccelGrowthFactor;
+    //AccelMultiplier *= Square(RepeatCount);
+    
     int32 InputCount = 0;
     if(Input.IsUpPressed)
     {
@@ -494,6 +528,7 @@ MoveCharacter(game_character* Character,
         Character->Accel *= DiagonalConst;
         MaxSpeedLocal *= DiagonalConst;
         DragCoeff *= DiagonalConst;
+        //AccelMultiplier *= DiagonalConst;
     }
     
     if(EffectRandomizer)
@@ -504,11 +539,11 @@ MoveCharacter(game_character* Character,
         Character->Accel.Y *=  1 - Effect;
     }
     
-    Character->Vel += Character->Accel * deltaTimeSec;
+    Character->Vel += Character->Accel * deltaTimeSec * AccelMultiplier;
     real32 SpeedRatioX = (abs((int)(Character->Vel.X * 1000)) / 1000) / MaxSpeedLocal;
-    Character->Vel.X *=  1 - ((FrictionCoeff / 2) + ((DragCoeff / 2) * SpeedRatioX)); 
+    Character->Vel.X *=  1 - ((FrictionCoeff / 2) + ((DragCoeff / 2) * Square(SpeedRatioX))); 
     real32 SpeedRatioY = (abs((int)(Character->Vel.Y * 1000)) / 1000) / MaxSpeedLocal;
-    Character->Vel.Y *=  1 - ((FrictionCoeff / 2) + ((DragCoeff / 2) * SpeedRatioY)); 
+    Character->Vel.Y *=  1 - ((FrictionCoeff / 2) + ((DragCoeff / 2) * Square(SpeedRatioY))); 
     
     if(Length(Character->Vel) > Character->MaxSpeed)
     {
@@ -627,6 +662,24 @@ WinMain(HINSTANCE Instance,
             Win32ResizeOrCreateDisplayBuffer(1280, 720);
             Win32ResizeOrCreateDisplayBuffer(110, 80, &KeysBuffer);
             
+            int MonitorRefreshHz = 60;
+            HDC RefreshDC = GetDC(Window);
+            int Win32RefreshRate = GetDeviceCaps(RefreshDC, VREFRESH);
+            ReleaseDC(Window, RefreshDC);
+            if(Win32RefreshRate > 1)
+            {
+                MonitorRefreshHz = Win32RefreshRate;
+            }
+            real32 GameUpdateHz = (MonitorRefreshHz / 1.0f);
+            real32 TargetSecondsPerFrame = 1.0f / (real32)GameUpdateHz;
+            
+            LARGE_INTEGER PerfCountFrequencyResult;
+            QueryPerformanceFrequency(&PerfCountFrequencyResult);
+            GlobalPerfCountFrequency = PerfCountFrequencyResult.QuadPart;
+            
+            UINT DesiredSchedulerMS = 1;
+            bool32 SleepIsGranular = (timeBeginPeriod(DesiredSchedulerMS) == TIMERR_NOERROR);
+            
             GlobalRunning = true;
             
             GlobalInput = {};
@@ -637,10 +690,11 @@ WinMain(HINSTANCE Instance,
             RectCharacter.Dim = V2(30, 30);
             RectCharacter.Accel = {};
             RectCharacter.Vel = {};
-            RectCharacter.MaxSpeed = 10000;
+            RectCharacter.MaxSpeed = 1000;
             RectCharacter.Color = 0x00ff00ff;
             while(GlobalRunning)
             {
+                LARGE_INTEGER FrameStartTime = Win32GetWallClock();
                 Win32ClearDisplayBufferToStaticColors();
                 // Get Inputs
                 MSG Message = {};
@@ -663,6 +717,27 @@ WinMain(HINSTANCE Instance,
                                                    Dimension.Width,
                                                    Dimension.Height);
                 GlobalOldInput = GlobalInput;
+                LARGE_INTEGER FrameDoneTime = Win32GetWallClock();
+                real32 FrameProcessingTimeSec = Win32GetSecondsElapsed(FrameStartTime, FrameDoneTime);
+                if(FrameProcessingTimeSec < TargetSecondsPerFrame)
+                {
+                    if(SleepIsGranular)
+                    {
+                        DWORD SleepMS = (DWORD)(1000.0f * 0.87f * (TargetSecondsPerFrame -
+                                                                   FrameProcessingTimeSec));
+                        if(SleepMS > 0)
+                        {
+                            Sleep(SleepMS);
+                        }
+                    }
+                    real32 FrameElapsedTimeSec = Win32GetSecondsElapsed(FrameStartTime,
+                                                                        Win32GetWallClock());
+                    while(FrameElapsedTimeSec < TargetSecondsPerFrame)
+                    {                            
+                        FrameElapsedTimeSec = Win32GetSecondsElapsed(FrameStartTime,
+                                                                     Win32GetWallClock());
+                    }
+                }
             }
         }
     }
