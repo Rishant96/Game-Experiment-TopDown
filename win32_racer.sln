@@ -17,6 +17,14 @@ Project("{911E67C6-3D85-4FCE-B560-20A9C3E3FF48}") = "win32_racer", "build\win32_
 		IORedirection = Auto
 	EndProjectSection
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{CA49FB27-52F5-4039-B372-48250B7C9F36}"
+	ProjectSection(SolutionItems) = preProject
+		source\racer_game.cpp = source\racer_game.cpp
+		source\racer_game.h = source\racer_game.h
+		source\racer_math.h = source\racer_math.h
+		source\win32_racer.cpp = source\win32_racer.cpp
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Release|x64 = Release|x64

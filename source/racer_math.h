@@ -138,4 +138,19 @@ Square(real32 A)
     return (A * A);
 }
 
+
+inline int
+RoundToCeil(float val)
+{
+    if(val < 0)
+    {
+        val -= 0.5;
+    }
+    else if(val > 0)
+    {
+        val += 0.5;
+    }
+    return (int)val;
+}
+
 #endif //RACER_MATH_H
